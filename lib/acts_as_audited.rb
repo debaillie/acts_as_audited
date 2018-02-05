@@ -51,6 +51,13 @@ module CollectiveIdea #:nodoc:
         #     class User < ActiveRecord::Base
         #       acts_as_audited :except => :password
         #     end
+        # * +simple+ - Simplifies the saving of fields to the audit log
+        #   By default, acts_as_audited will to_yaml all the attribytes.  Attributes marked as
+        #   simple will be only saved with to_s.
+        #
+        #     class User < ActiveRecord::Base
+        #       acts_as_audited :simple => [:start_time, :end_time]
+        #     end
         # * +protect+ - If your model uses +attr_protected+, set this to false to prevent Rails from
         #   raising an error.  If you declare +attr_accessibe+ before calling +acts_as_audited+, it
         #   will automatically default to false.  You only need to explicitly set this if you are
@@ -69,6 +76,7 @@ module CollectiveIdea #:nodoc:
 
           class_inheritable_reader :non_audited_columns
           class_inheritable_reader :auditing_enabled
+          class_inheritable_reader :simplified_columns
           
           if options[:only]
             except = self.column_names - options[:only].flatten.map(&:to_s)
@@ -78,6 +86,9 @@ module CollectiveIdea #:nodoc:
             except |= Array(options[:except]).collect(&:to_s) if options[:except]
           end
           write_inheritable_attribute :non_audited_columns, except
+
+          simple = Array(options[:simple]).collect(&:to_s) 
+          write_inheritable_attribute :simplified_columns, simple
 
           has_many :audits, :as => :auditable, :order => "#{Audit.quoted_table_name}.version"
           attr_protected :audit_ids if options[:protect]
@@ -138,7 +149,11 @@ module CollectiveIdea #:nodoc:
         end
 
         def audited_attributes
-          attributes.except(*non_audited_columns)
+          attrs = attributes.except(*non_audited_columns)
+          simplified_columns.each do |simple_column|
+            attrs[simple_column] = attrs[simple_column].to_s
+          end
+          attrs
         end
 
       protected
@@ -166,7 +181,11 @@ module CollectiveIdea #:nodoc:
 
         def audited_changes
           changed_attributes.except(*non_audited_columns).inject({}) do |changes,(attr, old_value)|
-            changes[attr] = [old_value, self[attr]]
+            if simplified_columns.include?(attr)
+              changes[attr] = [old_value.to_s, self[attr].to_s]
+            else
+              changes[attr] = [old_value, self[attr]]
+            end
             changes
           end
         end
